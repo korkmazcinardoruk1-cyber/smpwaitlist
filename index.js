@@ -18,10 +18,11 @@ const {
 // --- RAILWAY DEĞİŞKENLERİ ---
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
-const WAITLIST_ROLE_ID = process.env.WAITLIST_ROLE_ID || "1545489606244302899";
-const BOOSTER_ROLE_ID = process.env.BOOSTER_ROLE_ID || "1530296291152760905";
-const TESTER_ROLE_ID = process.env.TESTER_ROLE_ID || "1530296291152760905";
-const TEST_LOG_CHANNEL_ID = process.env.TEST_LOG_CHANNEL_ID || "1545491558458064966";
+const WAITLIST_ROLE_ID = process.env.WAITLIST_ROLE_ID;
+const BOOSTER_ROLE_ID = process.env.BOOSTER_ROLE_ID;
+const TESTER_ROLE_ID = process.env.TESTER_ROLE_ID;
+const TEST_LOG_CHANNEL_ID = process.env.TEST_LOG_CHANNEL_ID;
+const WAITLIST_CHANNEL_ID = process.env.WAITLIST_CHANNEL_ID;
 
 const MAX_QUEUE_CAPACITY = 20;
 const NORMAL_COOLDOWN = 5 * 24 * 60 * 60 * 1000; // 5 Gün
@@ -53,7 +54,21 @@ function getMcSkinUrl(username, isPremium) {
     return "https://crafatar.com/renders/head/8667ba71-b85a-4004-af54-457a973daf31?overlay=true";
 }
 
-// --- EMBED OLUŞTURUCU ---
+// --- WAITLIST ROLÜNE BİLDİRİM (PING) ATMA FONKSİYONU ---
+async function notifyWaitlistRole(guild) {
+    if (!WAITLIST_CHANNEL_ID || !WAITLIST_ROLE_ID) return;
+    try {
+        const channel = guild.channels.cache.get(WAITLIST_CHANNEL_ID);
+        if (channel) {
+            const pingMsg = await channel.send({ content: `<@&${WAITLIST_ROLE_ID}> 🟢 **SMP Test Sırası Açıldı!** Katılmak için aşağıdaki butonu kullanabilirsiniz.` });
+            setTimeout(() => pingMsg.delete().catch(() => {}), 10000); // 10 sn sonra silinir, bildirim kalır
+        }
+    } catch (err) {
+        console.error("Ping atma hatası:", err);
+    }
+}
+
+// --- EMBED OLUŞTURUCU ---
 function createQueueEmbed(guild) {
     const isOpen = queueData.isOpen;
     const queueCount = queueData.queue.length;
@@ -158,7 +173,7 @@ function getTesterPanelButtons() {
     );
 }
 
-// --- TICKET KANAL OLUSTURUCU ---
+// --- TICKET KANAL OLUŞTURUCU ---
 async function createTestTicket(guild, targetUser, testerUser) {
     const channelName = `test-${targetUser.username}`.toLowerCase().replace(/[^a-z0-9-_]/g, '');
 
@@ -219,7 +234,7 @@ const commands = [
         .setDescription('Waitlist yönetim komutları')
         .addSubcommand(sub =>
             sub.setName('ac')
-               .setDescription('Test sırasını açar'))
+               .setDescription('Test sırasını açar ve Waitlist rolünü etiketler'))
         .addSubcommand(sub =>
             sub.setName('kapat')
                .setDescription('Test sırasını kapatır')),
@@ -270,7 +285,8 @@ client.on('interactionCreate', async interaction => {
             if (sub === 'ac') {
                 queueData.isOpen = true;
                 queueData.activeTesters.add(interaction.user.id);
-                return interaction.reply({ content: "🟢 **Test sırası açıldı!**", ephemeral: true });
+                await notifyWaitlistRole(guild); // Waitlist rolüne bildirim at
+                return interaction.reply({ content: "🟢 **Test sırası açıldı ve Waitlist rolüne duyuru geçildi!**", ephemeral: true });
             } else if (sub === 'kapat') {
                 queueData.isOpen = false;
                 queueData.activeTesters.delete(interaction.user.id);
@@ -278,7 +294,6 @@ client.on('interactionCreate', async interaction => {
             }
         }
 
-        // /testsonuc komutu
         if (commandName === 'testsonuc') {
             const isTester = member.roles.cache.has(TESTER_ROLE_ID) || member.permissions.has(PermissionFlagsBits.Administrator);
             if (!isTester) return interaction.reply({ content: "❌ Sadece **Tester** yetkilileri kullanabilir!", ephemeral: true });
@@ -291,7 +306,6 @@ client.on('interactionCreate', async interaction => {
 
             const userInfo = userFormData.get(targetUser.id) || { isPremium: true };
 
-            // Fotoğraftaki Birebir Tasarım (Tüm alanlar kutucuklu: `değer`)
             const resultEmbed = new EmbedBuilder()
                 .setColor(0x2B2D31)
                 .setAuthor({ name: `${targetUser.username} için Test Sonucu`, iconURL: targetUser.displayAvatarURL() })
@@ -347,15 +361,19 @@ client.on('interactionCreate', async interaction => {
                 isPremium
             });
 
-            const role = interaction.guild.roles.cache.get(WAITLIST_ROLE_ID);
-            if (role) await interaction.member.roles.add(role);
+            if (WAITLIST_ROLE_ID) {
+                const role = interaction.guild.roles.cache.get(WAITLIST_ROLE_ID);
+                if (role) await interaction.member.roles.add(role).catch(err => console.error("Rol verilemedi:", err));
+            }
 
             const isBooster = interaction.member.roles.cache.has(BOOSTER_ROLE_ID);
             const cooldownTime = isBooster ? BOOSTER_COOLDOWN : NORMAL_COOLDOWN;
             cooldowns.set(interaction.user.id, Date.now() + cooldownTime);
 
+            const channelMention = WAITLIST_CHANNEL_ID ? `<#${WAITLIST_CHANNEL_ID}>` : "Sıra Kanalı";
+
             return interaction.reply({ 
-                content: `✅ **Waitlist Bilgileriniz Kaydedildi!**\n🎮 **MC Nick:** ${mcNick}\n🌐 **IP:** ${serverIp}\n💎 **Tür:** ${isPremium ? "Premium" : "Craft/Cracked"}\n\nSıra kanalına geçebilirsiniz.`, 
+                content: `✅ **Waitlist Bilgileriniz Kaydedildi!**\n🎮 **MC Nick:** \`${mcNick}\`\n🌐 **IP:** \`${serverIp}\`\n💎 **Tür:** \`${isPremium ? "Premium" : "Craft/Cracked"}\`\n\n👉 Artık ${channelMention} kanalına geçip **Katıl** butonuna basarak sıraya girebilirsin!`, 
                 ephemeral: true 
             });
         }
@@ -371,7 +389,7 @@ client.on('interactionCreate', async interaction => {
                 const rem = cooldowns.get(user.id) - now;
                 const d = Math.floor(rem / (86400000));
                 const h = Math.floor((rem % 86400000) / 3600000);
-                return interaction.reply({ content: `⚠️ **Bekleme Süresi!** Kalan: ${d} gün ${h} saat.`, ephemeral: true });
+                return interaction.reply({ content: `⚠️ **Bekleme Süresi!** Tekrar başvuru yapmak için kalan süre: **${d} gün ${h} saat**.`, ephemeral: true });
             }
 
             const modal = new ModalBuilder()
@@ -404,6 +422,18 @@ client.on('interactionCreate', async interaction => {
             );
 
             return interaction.showModal(modal);
+        }
+
+        if (customId === 'main_cooldown_check_btn') {
+            const now = Date.now();
+            if (cooldowns.has(user.id) && now < cooldowns.get(user.id)) {
+                const rem = cooldowns.get(user.id) - now;
+                const d = Math.floor(rem / (86400000));
+                const h = Math.floor((rem % 86400000) / 3600000);
+                return interaction.reply({ content: `⏰ Kalan Cooldown süreniz: **${d} gün ${h} saat**.`, ephemeral: true });
+            } else {
+                return interaction.reply({ content: "🟢 Şu an herhangi bir bekleme süreniz (cooldown) yok! Başvuru yapabilirsiniz.", ephemeral: true });
+            }
         }
 
         if (customId === 'btn_queue_join') {
@@ -454,9 +484,13 @@ client.on('interactionCreate', async interaction => {
 
         if (customId === 'tp_toggle') {
             queueData.isOpen = !queueData.isOpen;
-            if (queueData.isOpen) queueData.activeTesters.add(user.id);
-            else queueData.activeTesters.delete(user.id);
-            return interaction.reply({ content: `✅ Sıra: **${queueData.isOpen ? "AÇIK" : "KAPALI"}**`, ephemeral: true });
+            if (queueData.isOpen) {
+                queueData.activeTesters.add(user.id);
+                await notifyWaitlistRole(guild); // Tester panelinden açıldığında da duyuru geçer
+            } else {
+                queueData.activeTesters.delete(user.id);
+            }
+            return interaction.reply({ content: `✅ Sıra: **${queueData.isOpen ? "AÇIK (Waitlist etiketlendi)" : "KAPALI"}**`, ephemeral: true });
         }
 
         if (customId === 'tp_clear') {
