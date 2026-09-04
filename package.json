@@ -1,7 +1,6 @@
 {
   "name": "smp-waitlist-bot",
   "version": "1.0.0",
-  "description": "Minecraft SMP Waitlist Discord Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
